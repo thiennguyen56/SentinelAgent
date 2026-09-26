@@ -1,33 +1,63 @@
 import json
+import logging
+from typing import Protocol
 
-from llm import (
+from app.llm import (
+    LLMCallMetadata,
     LLMClient,
     MalformedLLMResponse,
 )
-from memory import MemoryStore
-from model import (
+from app.memory import ConversationMemory
+from app.model import (
     ChatResponse,
     FinalAnswer,
     Message,
     ToolCallResponse,
 )
-from tools import (
+from app.tools import (
     InvalidToolArgumentsError,
     ToolExecutionError,
     ToolRegistry,
+    UnauthorizedToolRequest,
     UnknownToolError,
 )
+
+logger = logging.getLogger(__name__)
+
+
+class LLMCallObserver(Protocol):
+    def record(self, metadata: LLMCallMetadata) -> None:
+        return
+
+
+class LoggingLLMCallObserver:
+    def record(self, metadata: LLMCallMetadata) -> None:
+        logger.info(
+            "llm_call_completed model=%s duration_ms=%.2f "
+            "prompt_tokens=%s completion_tokens=%s total_tokens=%s",
+            metadata.model,
+            metadata.duration_ms,
+            metadata.prompt_tokens,
+            metadata.completion_tokens,
+            metadata.total_tokens,
+        )
+
 
 MAX_TOOL_CALLS = 5
 
 
 class AgentService:
     def __init__(
-        self, llm: LLMClient, memory: MemoryStore, tools: ToolRegistry
+        self,
+        llm: LLMClient,
+        memory: ConversationMemory,
+        tools: ToolRegistry,
+        observer: LLMCallObserver | None = None,
     ) -> None:
         self.llm = llm
         self.memory = memory
         self.tools = tools
+        self.observer = observer
 
     async def chat(self, session_id: str, user_id: str, message: str) -> ChatResponse:
 
@@ -39,8 +69,19 @@ class AgentService:
             history = await self.memory.get(session_id=session_id)
 
             try:
-                response = await self.llm.generate(history)
-            except MalformedLLMResponse:
+                llm_call_result = await self.llm.generate(
+                    history, self.tools.get_registered_tools()
+                )
+                response = llm_call_result.response
+
+                if self.observer is not None:
+                    try:
+                        self.observer.record(llm_call_result.metadata)
+                    except Exception:
+                        logger.exception("Failed to record LLM call metadata")
+
+            except MalformedLLMResponse as exc:
+                logger.warning("Rejected LLM response: %s", exc)
                 return ChatResponse(
                     session_id=session_id,
                     user_id=user_id,
@@ -62,10 +103,14 @@ class AgentService:
                 )
             if isinstance(response, ToolCallResponse):
                 tool_call = response.tool_call
-
+                await self.memory.append(
+                    session_id, Message(role="assistant", tool_calls=[tool_call])
+                )
                 try:
                     result = await self.tools.execute(
-                        name=tool_call.name, arguments=tool_call.arguments
+                        name=tool_call.name,
+                        arguments=tool_call.arguments,
+                        user_id=user_id,
                     )
                 except UnknownToolError:
                     result = {
@@ -81,12 +126,24 @@ class AgentService:
                     result = {
                         "error": "tool_execution_failed",
                     }
+                except UnauthorizedToolRequest:
+                    reply = "I can’t provide information for that order."
+                    await self.memory.append(
+                        session_id,
+                        Message(role="assistant", content=reply),
+                    )
+                    return ChatResponse(
+                        session_id=session_id,
+                        user_id=user_id,
+                        message=reply,
+                    )
 
                 await self.memory.append(
                     session_id,
                     Message(
                         role="tool",
                         name=tool_call.name,
+                        tool_call_id=tool_call.id,
                         content=json.dumps(result),
                     ),
                 )

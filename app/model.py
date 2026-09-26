@@ -15,15 +15,18 @@ class ChatResponse(BaseModel):
     message: str
 
 
-class Message(BaseModel):
-    role: Literal["user", "assistant", "tool"]
-    content: str
-    name: str | None = None
-
-
 class ToolCall(BaseModel):
+    id: str
     name: str
     arguments: dict[str, Any]
+
+
+class Message(BaseModel):
+    role: Literal["user", "assistant", "tool"]
+    content: str | None = None
+    name: str | None = None
+    tool_call_id: str | None = None
+    tool_calls: list[ToolCall] | None = None
 
 
 class FinalAnswer(BaseModel):

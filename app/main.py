@@ -1,42 +1,52 @@
-from agent import AgentService
+import logging
+
 from fastapi import FastAPI
-from llm import FakeLLMClient
-from memory import MemoryStore
-from model import ChatRequest, ChatResponse, LLMResponse, ToolCall
-from tools import GetOrderStatusTool, ToolRegistry
+
+from app.agent import AgentService, LoggingLLMCallObserver
+from app.llm import OpenRouterLLMClient
+from app.memory import InMemoryMemoryStore
+from app.model import ChatRequest, ChatResponse
+from app.tools import GetOrderStatusTool, ToolRegistry
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
 
 app = FastAPI()
 
-memory = MemoryStore()
+memory = InMemoryMemoryStore()
+
 
 tools = ToolRegistry()
 tools.register(GetOrderStatusTool().name, GetOrderStatusTool())
-llm = FakeLLMClient(
-    responses=[
-        {
-            "type": "tool_call",
-            "tool_call": {
-                "name": "get_order_status",
-                "arguments": {
-                    "order_id": "ORD001",
-                },
-            },
-        },
-        {
-            "type": "final",
-            "content": (
-                "ORD001 has shipped and is expected to arrive on September 25."
-            ),
-        },
-    ]
-)
+# llm = FakeLLMClient(
+#     responses=[
+#         {
+#             "type": "tool_call",
+#             "tool_call": {
+#                 "name": "get_order_status",
+#                 "arguments": {
+#                     "order_id": "ORD001",
+#                 },
+#             },
+#         },
+#         {
+#             "type": "final",
+#             "content": (
+#                 "ORD001 has shipped and is expected to arrive on September 25."
+#             ),
+#         },
+#     ]
+# )
 
-print("hello", not llm._responses)
+llm = OpenRouterLLMClient()
 
 agent = AgentService(
     llm=llm,
     memory=memory,
     tools=tools,
+    observer=LoggingLLMCallObserver(),
 )
 
 
