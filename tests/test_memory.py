@@ -2,7 +2,7 @@ import asyncio
 import unittest
 
 from app.memory import InMemoryMemoryStore
-from app.model import Message
+from app.model import Message, ToolCall
 
 
 class InMemoryMemoryStoreTests(unittest.TestCase):
@@ -50,6 +50,97 @@ class InMemoryMemoryStoreTests(unittest.TestCase):
         self.assertEqual(
             [message.content for message in user_two], ["private to USER002"]
         )
+
+    def test_trimming_preserves_complete_tool_turns(self) -> None:
+        turns = []
+        for index in range(6):
+            call_id = f"call-{index}"
+            turns.append(
+                [
+                    Message(role="user", content=f"question-{index}"),
+                    Message(
+                        role="assistant",
+                        tool_calls=[
+                            ToolCall(
+                                id=call_id,
+                                name="get_order_status",
+                                arguments={"order_id": "ORD001"},
+                            )
+                        ],
+                    ),
+                    Message(
+                        role="tool",
+                        name="get_order_status",
+                        tool_call_id=call_id,
+                        content='{"status":"shipped"}',
+                    ),
+                    Message(role="assistant", content=f"answer-{index}"),
+                ]
+            )
+        newest = Message(role="user", content="My next question")
+        messages = [message for turn in turns for message in turn] + [newest]
+
+        memory = InMemoryMemoryStore()
+
+        async def append_and_get() -> list[Message]:
+            for message in messages:
+                await memory.append("USER001", "trimming-session", message)
+            return await memory.get("USER001", "trimming-session")
+
+        history = asyncio.run(append_and_get())
+
+        self.assertEqual(len(history), 17)
+        self.assertEqual(history[0].content, "question-2")
+        self.assertEqual(history[-1], newest)
+        self.assertEqual(
+            history,
+            [message for turn in turns[2:] for message in turn] + [newest],
+        )
+        for start in range(0, 16, 4):
+            user, assistant, result, final = history[start : start + 4]
+            self.assertEqual(
+                [user.role, assistant.role, result.role, final.role],
+                ["user", "assistant", "tool", "assistant"],
+            )
+            self.assertEqual(result.tool_call_id, assistant.tool_calls[0].id)
+
+    def test_latest_oversized_turn_is_preserved(self) -> None:
+        messages = [Message(role="user", content="Check my orders")]
+        for index in range(10):
+            call_id = f"call-{index}"
+            messages.extend(
+                [
+                    Message(
+                        role="assistant",
+                        tool_calls=[
+                            ToolCall(
+                                id=call_id,
+                                name="get_order_status",
+                                arguments={"order_id": "ORD001"},
+                            )
+                        ],
+                    ),
+                    Message(
+                        role="tool",
+                        name="get_order_status",
+                        tool_call_id=call_id,
+                        content='{"status":"shipped"}',
+                    ),
+                ]
+            )
+        messages.append(Message(role="assistant", content="All checked"))
+
+        memory = InMemoryMemoryStore()
+
+        async def append_and_get() -> list[Message]:
+            for message in messages:
+                await memory.append("USER001", "trimming-session", message)
+            return await memory.get("USER001", "trimming-session")
+
+        history = asyncio.run(append_and_get())
+
+        self.assertEqual(len(history), 22)
+        self.assertEqual(history, messages)
 
 
 if __name__ == "__main__":

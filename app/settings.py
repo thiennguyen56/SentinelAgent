@@ -7,6 +7,9 @@ class Settings(BaseSettings):
     openrouter_model: str
     database_url: SecretStr
 
+    auth_user001_token: SecretStr
+    auth_user002_token: SecretStr
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

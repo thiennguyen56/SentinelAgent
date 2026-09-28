@@ -1,11 +1,18 @@
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import Annotated
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Request
+from sqlalchemy import text
 
 from app.agent import AgentService, LoggingLLMCallObserver
+from app.auth import get_current_user_id
+from app.database import create_database_engine, create_session_factory
 from app.llm import OpenRouterLLMClient
-from app.memory import InMemoryMemoryStore
+from app.memory import PostgresMemoryStore
 from app.model import ChatRequest, ChatResponse
+from app.settings import DatabaseSettings
 from app.tools import GetOrderStatusTool, ToolRegistry
 
 logging.basicConfig(
@@ -13,41 +20,43 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 
-app = FastAPI()
 
-memory = InMemoryMemoryStore()
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    settings = DatabaseSettings()
+    engine = create_database_engine(settings.database_url.get_secret_value())
+
+    try:
+        # Verify connectivity before accepting requests.
+        async with engine.connect() as connection:
+            await connection.execute(text("SELECT 1"))
+
+        session_factory = create_session_factory(engine)
+        memory = PostgresMemoryStore(session_factory)
+
+        app.state.agent = AgentService(
+            llm=llm,
+            memory=memory,
+            tools=tools,
+            observer=LoggingLLMCallObserver(),
+        )
+
+        yield
+    finally:
+        await engine.dispose()
+
+
+app = FastAPI(lifespan=lifespan)
+
+
+def get_agent(request: Request) -> AgentService:
+    return request.app.state.agent
 
 
 tools = ToolRegistry()
 tools.register(GetOrderStatusTool().name, GetOrderStatusTool())
-# llm = FakeLLMClient(
-#     responses=[
-#         {
-#             "type": "tool_call",
-#             "tool_call": {
-#                 "name": "get_order_status",
-#                 "arguments": {
-#                     "order_id": "ORD001",
-#                 },
-#             },
-#         },
-#         {
-#             "type": "final",
-#             "content": (
-#                 "ORD001 has shipped and is expected to arrive on September 25."
-#             ),
-#         },
-#     ]
-# )
 
 llm = OpenRouterLLMClient()
-
-agent = AgentService(
-    llm=llm,
-    memory=memory,
-    tools=tools,
-    observer=LoggingLLMCallObserver(),
-)
 
 
 @app.get("/")
@@ -66,10 +75,14 @@ async def readyz():
 
 
 @app.post("/chat")
-async def chat(request: ChatRequest) -> ChatResponse:
+async def chat(
+    request: ChatRequest,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    agent: Annotated[AgentService, Depends(get_agent)],
+) -> ChatResponse:
     return await agent.chat(
         session_id=request.session_id,
-        user_id=request.user_id,
+        user_id=user_id,
         message=request.message,
     )
 

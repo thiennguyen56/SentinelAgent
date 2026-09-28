@@ -29,3 +29,4 @@ alembic = "^1.20.0"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = ["integration: requires a migrated PostgreSQL test database"]

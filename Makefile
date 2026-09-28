@@ -4,7 +4,7 @@ HOST ?= 127.0.0.1
 PORT ?= 8081
 
 .DEFAULT_GOAL := help
-.PHONY: help install run test lint lint-fix format format-check lock-check check \
+.PHONY: help install run test integration-test lint lint-fix format format-check lock-check check \
 	db-revision db-upgrade db-current db-history
 
 help: ## Show available commands
@@ -18,6 +18,10 @@ run: ## Run the FastAPI app with auto-reload
 
 test: ## Run the test suite
 	$(POETRY) run pytest -q
+
+integration-test: ## Run PostgreSQL integration tests (set TEST_DATABASE_URL)
+	@test -n "$(TEST_DATABASE_URL)" || { echo "Set TEST_DATABASE_URL to a dedicated, migrated PostgreSQL test database" >&2; exit 2; }
+	TEST_DATABASE_URL="$(TEST_DATABASE_URL)" $(POETRY) run pytest -q -m integration
 
 db-revision: ## Create an Alembic revision (use REVISION_MESSAGE='...')
 	@test -n "$(REVISION_MESSAGE)" || { echo "Set REVISION_MESSAGE, e.g. make db-revision REVISION_MESSAGE='create conversation table'" >&2; exit 2; }

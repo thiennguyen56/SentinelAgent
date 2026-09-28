@@ -132,6 +132,16 @@ class AgentService:
                         "error": "tool_execution_failed",
                     }
                 except UnauthorizedToolRequest:
+                    await self.memory.append(
+                        user_id,
+                        session_id,
+                        Message(
+                            role="tool",
+                            name=tool_call.name,
+                            tool_call_id=tool_call.id,
+                            content=json.dumps({"error": "order_not_available"}),
+                        ),
+                    )
                     reply = "I can’t provide information for that order."
                     await self.memory.append(
                         user_id,
