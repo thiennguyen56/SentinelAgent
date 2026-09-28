@@ -1,5 +1,7 @@
 from typing import Protocol
 
+from sqlalchemy import bindparam, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.model import Message
@@ -31,3 +33,7 @@ class PostgresMemoryStore:
         self._session_factory = session_factory
 
     async def append(self, user_id: str, session_id: str, message: Message) -> None:
+        return
+
+    async def get(self, user_id: str, session_id: str) -> list[Message]:
+        return []
