@@ -43,7 +43,7 @@ class OrderAuthorizationTests(unittest.TestCase):
                 message="Where is ORD001?",
             )
         )
-        history = asyncio.run(memory.get("owner-session"))
+        history = asyncio.run(memory.get("USER001", "owner-session"))
 
         self.assertEqual(
             response.message,
@@ -69,7 +69,7 @@ class OrderAuthorizationTests(unittest.TestCase):
                 message="Where is ORD001?",
             )
         )
-        history = asyncio.run(memory.get("non-owner-session"))
+        history = asyncio.run(memory.get("USER002", "non-owner-session"))
 
         self.assertEqual(
             response.message,

@@ -62,11 +62,13 @@ class AgentService:
     async def chat(self, session_id: str, user_id: str, message: str) -> ChatResponse:
 
         await self.memory.append(
-            session_id=session_id, message=Message(role="user", content=message)
+            user_id=user_id,
+            session_id=session_id,
+            message=Message(role="user", content=message),
         )
 
         for _ in range(MAX_TOOL_CALLS + 1):
-            history = await self.memory.get(session_id=session_id)
+            history = await self.memory.get(user_id=user_id, session_id=session_id)
 
             try:
                 llm_call_result = await self.llm.generate(
@@ -89,6 +91,7 @@ class AgentService:
                 )
             if isinstance(response, FinalAnswer):
                 await self.memory.append(
+                    user_id,
                     session_id,
                     Message(
                         role="assistant",
@@ -104,7 +107,9 @@ class AgentService:
             if isinstance(response, ToolCallResponse):
                 tool_call = response.tool_call
                 await self.memory.append(
-                    session_id, Message(role="assistant", tool_calls=[tool_call])
+                    user_id,
+                    session_id,
+                    Message(role="assistant", tool_calls=[tool_call]),
                 )
                 try:
                     result = await self.tools.execute(
@@ -129,6 +134,7 @@ class AgentService:
                 except UnauthorizedToolRequest:
                     reply = "I can’t provide information for that order."
                     await self.memory.append(
+                        user_id,
                         session_id,
                         Message(role="assistant", content=reply),
                     )
@@ -139,6 +145,7 @@ class AgentService:
                     )
 
                 await self.memory.append(
+                    user_id,
                     session_id,
                     Message(
                         role="tool",
